@@ -1,0 +1,10 @@
+LiDAR sensor:
+https://www.farnell.com/datasheets/3161941.pdf
+
+RC car:
+https://www.robotshop.com/products/xiaor-geek-diy-4wd-robot-car-chassis-kits-compatible-arduino-raspberry-pi-stm32?srsltid=AfmBOoqYcMkZENn3p9gA_im_dvQ16HuiBEqAiYYH5bUMzDl_61I3N8UDe0I
+
+Portable battery for Pi:
+https://www.pisugar.com/products/pisugar-s-plus-raspberry-pi-ups
+
+**Document can be deleted later if not needed**
