@@ -5,16 +5,16 @@ DESCRIPTION:
 
 TECHNOLOGY:
 
-##Hardware: LiDAR sensors, microcontrollers, motors, and 3D printer.
-##Software: C/C++, Python, embedded networking.
+## Hardware: LiDAR sensors, microcontrollers, motors, and 3D printer.
+## Software: C/C++, Python, embedded networking.
 
 TO USE:
 
-##EXAMPLE: Download .zip including C and Python files. Run files.
+## EXAMPLE: Download .zip including C and Python files. Run files.
 
 MEMBERS:
 
-##Zac Swisher, Sneha Patel, Jamil Velez, Bryton Montgomery
+## Zac Swisher, Sneha Patel, Jamil Velez, Bryton Montgomery
 
 
 
