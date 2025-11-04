@@ -1,5 +1,5 @@
 # LiDAR Data Capture
-import csv, math, time, sys, platform
+import csv, math, time, platform
 from pathlib import Path
 from rplidar import RPLidar
 # Auto-detect using pyserial package
@@ -30,18 +30,18 @@ DEVICE = None
 # Clues to check which port belongs to the LiDAR
 USB_HINTS = ("CP210", "Silicon Labs", "SLAB", "usbserial", "CH340", "USB-to-UART", "USB2.0-Serial")
 
-def CheckDevice():
+def check_device():
     sysname = platform.system().lower()
     if "windows" in sysname: return WIN_DEVICE
     if "darwin" in sysname:  return MAC_DEVICE
     return LINUX_DEVICE
 
-def DetectPort():
+def detect_port():
     if list_ports is None:    # Auto-detect fails, check system
-        return CheckDevice()
+        return check_device()
     candidates = list(list_ports.comports())     # Check all serial devices, add them to list
     if not candidates:        # Check again if it fails
-        return CheckDevice()
+        return check_device()
     # Prefer “usb”/“CP210x” style ports
     scored = []               # Array for determining which is most likely the LiDAR
     for p in candidates:      # Builds a blob containing description, hardware ID
@@ -57,7 +57,7 @@ def DetectPort():
             score += 1
         scored.append((score, p.device))
     scored.sort(reverse=True)
-    best = scored[0][1] if scored else CheckDevice()
+    best = scored[0][1] if scored else check_device()
     return best
 
 # Converts from polar to Cartesian in millimeters
@@ -88,79 +88,60 @@ def angular_span_deg(angles):
     return 360.0 - max(gaps)
 
 def main():
-    dev = DEVICE or DetectPort()
+    dev = DEVICE or detect_port()
     print(f"[info] Using device: {dev}")
-
     out = Path(OUT); out.parent.mkdir(parents=True, exist_ok=True)
-    lidar = None
-    try:
-        lidar = RPLidar(dev, baudrate=BAUD, timeout=TIMEOUT)
 
-        # Clean state
-        for fn in (lidar.stop, lidar.clear_input, lidar.stop_motor):
-            try: fn()
-            except Exception: pass
+    lidar = RPLidar(dev, baudrate=BAUD, timeout=TIMEOUT)
 
-        # Spin up
-        lidar.start_motor()
-        time.sleep(SPINUP_S)
+    # Clean state
+    for fn in (lidar.stop, lidar.clear_input, lidar.stop_motor):
+        try: fn()
+        except Exception: pass
 
-        it = lidar.iter_scans(max_buf_meas=5000)
+    # Spin up
+    lidar.start_motor()
+    time.sleep(SPINUP_S)
 
-        # Discard warm-up sweeps
-        for _ in range(WARMUP_SCANS):
-            try: next(it)
-            except Exception:
-                lidar.stop(); lidar.clear_input(); time.sleep(0.2)
-                it = lidar.iter_scans(max_buf_meas=5000)
+    it = lidar.iter_scans(max_buf_meas=5000)
 
-        saved = 0
-        with out.open("w", newline="") as f:
-            w = csv.writer(f)
-            w.writerow(["timestamp","scan_idx","meas_idx",
-                        "angle_deg","distance_mm","quality","x_mm","y_mm"])
+    # Discard warm-up sweeps
+    for _ in range(WARMUP_SCANS):
+        try: next(it)
+        except Exception:
+            lidar.stop(); lidar.clear_input(); time.sleep(0.2)
+            it = lidar.iter_scans(max_buf_meas=5000)
 
-            while saved < TARGET_SCANS:
-                attempts, best = 0, None  # (coverage, filtered)
+    saved = 0
+    with out.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["timestamp","scan_idx","meas_idx",
+                    "angle_deg","distance_mm","quality","x_mm","y_mm"])
 
-                while attempts < MAX_ATTEMPTS:
-                    attempts += 1
-                    scan = next(it)       # one sweep
-                    filtered = [(q, (ang % 360.0), dist) for (q, ang, dist) in scan if q >= MIN_QUALITY]
-                    filtered.sort(key=lambda t: t[1])
-                    cov = angular_span_deg([ang for _, ang, _ in filtered])
+        while saved < TARGET_SCANS:
+            attempts, best = 0, None  # (coverage, filtered)
 
-                    if best is None or cov > best[0]:
-                        best = (cov, filtered)
+            while attempts < MAX_ATTEMPTS:
+                attempts += 1
+                scan = next(it)       # one sweep
+                filtered = [(q, (ang % 360.0), dist) for (q, ang, dist) in scan if q >= MIN_QUALITY]
+                filtered.sort(key=lambda t: t[1])
+                cov = angular_span_deg([ang for _, ang, _ in filtered])
 
-                    if cov >= MIN_COVERAGE_DEG:
-                        break
+                if best is None or cov > best[0]:
+                    best = (cov, filtered)
 
-                cov, filtered = best if best else (0.0, [])
-                ts = time_ms()
-                for meas_idx, (q, ang, dist) in enumerate(filtered):
-                    x, y = xy(ang, dist)
-                    w.writerow([ts, saved, meas_idx, f"{ang:.3f}", f"{dist:.1f}", int(q), f"{x:.1f}", f"{y:.1f}"])
-                print(f"[info] Saved sweep #{saved} coverage={cov:.1f}° attempts={attempts}")
-                saved += 1
+                if cov >= MIN_COVERAGE_DEG:
+                    break
 
-        print(f"[ok] Saved {saved} scan(s) to {out.resolve()}")
+            cov, filtered = best if best else (0.0, [])
+            ts = time_ms()
+            for meas_idx, (q, ang, dist) in enumerate(filtered):
+                x, y = xy(ang, dist)
+                w.writerow([ts, saved, meas_idx, f"{ang:.3f}", f"{dist:.1f}", int(q), f"{x:.1f}", f"{y:.1f}"])
+            print(f"[info] Saved sweep #{saved} coverage={cov:.1f}° attempts={attempts}")
+            saved += 1
 
-#   This doesn't work currently. Trying to make it stop when connected to a device but here just in case.
-    finally:
-        if lidar:
-            try: lidar.stop()
-            except Exception: pass
-            try: lidar.stop_motor()
-            except Exception: pass
-            time.sleep(0.3)
-            # Best-effort force DTR low if driver exposes it (works on many Windows drivers too)
-            try:
-                lidar._serial.setDTR(False)
-            except Exception:
-                pass
-            try: lidar.disconnect()
-            except Exception: pass
+    print(f"[ok] Saved {saved} scan(s) to {out.resolve()}")
 
-if __name__ == "__main__":
-    main()
+main()
