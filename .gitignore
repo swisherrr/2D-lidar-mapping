@@ -1,2 +1,3 @@
 scripts/scans.csv
 .idea/
+scripts/__pycache__/

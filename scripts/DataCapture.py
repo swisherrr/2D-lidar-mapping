@@ -144,4 +144,5 @@ def main():
 
     print(f"[ok] Saved {saved} scan(s) to {out.resolve()}")
 
-main()
+if __name__ == "__main__":
+    main()
