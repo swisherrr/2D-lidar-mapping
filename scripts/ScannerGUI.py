@@ -1,11 +1,4 @@
-"""Real-time LiDAR Scanner Control GUI
-
-A GUI application for controlling the LiDAR scanner in real-time with features:
-- Start/Stop scanning
-- Real-time visualization
-- Export scan to CSV
-- Export scan plot to SVG
-"""
+"""Real-time LiDAR Scanner Control GUI"""
 
 from __future__ import annotations
 
@@ -163,6 +156,31 @@ class ScannerGUI:
         # Test connection button
         Button(device_frame, text="Test Connection", command=self.test_connection, padx=5, pady=2, bg="#2196F3", fg="white").pack(fill=tk.X, pady=(5, 0))
         
+        # Scan radius control
+        radius_frame = Frame(control_frame)
+        radius_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        Label(radius_frame, text="Max Scan Radius:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        
+        radius_control_frame = Frame(radius_frame)
+        radius_control_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        self.radius_var = StringVar(value="8000")
+        radius_spinbox = ttk.Spinbox(
+            radius_control_frame,
+            from_=1000,
+            to=50000,
+            textvariable=self.radius_var,
+            width=10,
+            command=self.update_radius
+        )
+        radius_spinbox.pack(side=tk.LEFT, padx=(0, 5))
+        
+        Label(radius_control_frame, text="mm").pack(side=tk.LEFT)
+        
+        # Bind to update when value is changed manually
+        self.radius_var.trace('w', lambda *args: self.update_radius())
+        
         # Control buttons
         button_frame = Frame(control_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
@@ -220,8 +238,11 @@ class ScannerGUI:
             self.ax = self.fig.add_subplot(111, projection='polar')
             self.ax.set_title("LiDAR Scan - Real-time")
             self.ax.grid(True, linestyle=":", linewidth=0.5)
-            # Set a reasonable default radial limit (in mm) - can be adjusted
-            self.max_radius = 8000  # 8 meters default max range
+            # Set initial radius from GUI control (defaults to 8000mm)
+            try:
+                self.max_radius = float(self.radius_var.get())
+            except (ValueError, AttributeError):
+                self.max_radius = 8000  # Fallback default
             self.ax.set_ylim(0, self.max_radius)
             self.scatter = None
             
@@ -330,6 +351,20 @@ class ScannerGUI:
         selected = self.device_var.get()
         if selected:
             self.device_port = selected
+    
+    def update_radius(self):
+        """Update the maximum scan radius for the plot."""
+        try:
+            new_radius = float(self.radius_var.get())
+            if new_radius > 0:
+                self.max_radius = new_radius
+                # Update plot if it exists
+                if hasattr(self, 'ax') and self.ax is not None:
+                    self.ax.set_ylim(0, self.max_radius)
+                    self.canvas.draw()
+        except (ValueError, AttributeError):
+            # Invalid value, ignore
+            pass
     
     def test_connection(self):
         """Test if the selected port can be opened."""
@@ -537,13 +572,8 @@ class ScannerGUI:
             # Plot points
             self.ax.scatter(angles, distances, s=10, color="tab:blue", alpha=0.6)
             
-            # Set fixed axis limits to prevent auto-zooming
-            # Use the maximum distance from current scan or keep existing max
-            if distances:
-                current_max = max(distances)
-                # Update max_radius if current scan exceeds it, but don't shrink it
-                if current_max > self.max_radius:
-                    self.max_radius = current_max * 1.1  # Add 10% padding
+            # Set fixed axis limits using the user-specified radius
+            # Don't auto-expand - use the radius from the GUI control
             self.ax.set_ylim(0, self.max_radius)
             
             # Update plot settings
