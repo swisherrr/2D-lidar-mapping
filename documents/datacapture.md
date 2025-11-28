@@ -19,7 +19,7 @@ Installation
 
 bash
 
-   git clone <your-repo-url>
+   git clone [<your-repo-url>](https://github.com/swisherrr/2D-lidar-mapping.git)
    cd <your-repo-directory>
 
     Install required dependencies:
