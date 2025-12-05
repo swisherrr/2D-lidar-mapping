@@ -99,11 +99,19 @@ class ScannerGUI:
         self.all_scans: List[List[Tuple[float, float, float]]] = []  # Store all scans
         self.scan_idx = 0
         self.device_port: Optional[str] = None
+        self.scan_buffer: List[List[Tuple[float, float, float]]] = []  # For averaging
+        self.min_quality = 10  # Default quality threshold
+        self.min_distance = 100  # Default min distance (mm)
+        self.max_distance = 8000  # Default max distance (mm)
+        self.remove_outliers = True  # Default: enable outlier removal
+        self.scan_averaging = False  # Default: disable averaging
+        self.avg_count = 3  # Default averaging count
         
         # Status variables
         self.status_var = StringVar(value="Ready")
         self.scan_count_var = StringVar(value="Scans: 0")
         self.coverage_var = StringVar(value="Coverage: 0.0°")
+        self.quality_stats_var = StringVar(value="Quality: N/A")
         
         # Setup GUI
         self.setup_gui()
@@ -181,6 +189,30 @@ class ScannerGUI:
         # Bind to update when value is changed manually
         self.radius_var.trace('w', lambda *args: self.update_radius())
         
+        # Quality threshold control
+        quality_frame = Frame(control_frame)
+        quality_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        Label(quality_frame, text="Min Quality:", font=("Arial", 10, "bold")).pack(anchor=tk.W)
+        
+        quality_control_frame = Frame(quality_frame)
+        quality_control_frame.pack(fill=tk.X, pady=(5, 0))
+        
+        self.quality_var = StringVar(value=str(self.min_quality))
+        quality_spinbox = ttk.Spinbox(
+            quality_control_frame,
+            from_=0,
+            to=63,
+            textvariable=self.quality_var,
+            width=10
+        )
+        quality_spinbox.pack(side=tk.LEFT, padx=(0, 5))
+        
+        Label(quality_control_frame, text="(0-15)", font=("Arial", 8), fg="gray").pack(side=tk.LEFT)
+        
+        # Update min_quality when spinbox changes
+        self.quality_var.trace('w', lambda *args: self.update_quality())
+        
         # Control buttons
         button_frame = Frame(control_frame)
         button_frame.pack(fill=tk.X, pady=(10, 0))
@@ -227,7 +259,8 @@ class ScannerGUI:
         status_label.pack(fill=tk.X, pady=(5, 5))
         
         Label(status_frame, textvariable=self.scan_count_var, anchor=tk.W).pack(fill=tk.X, pady=(0, 2))
-        Label(status_frame, textvariable=self.coverage_var, anchor=tk.W).pack(fill=tk.X)
+        Label(status_frame, textvariable=self.coverage_var, anchor=tk.W).pack(fill=tk.X, pady=(0, 2))
+        Label(status_frame, textvariable=self.quality_stats_var, anchor=tk.W, font=("Arial", 8), fg="gray").pack(fill=tk.X)
         
         # Plot area (right side)
         plot_frame = Frame(main_frame)
@@ -366,6 +399,137 @@ class ScannerGUI:
             # Invalid value, ignore
             pass
     
+    def update_quality(self):
+        """Update the minimum quality threshold."""
+        try:
+            new_quality = int(self.quality_var.get())
+            if 0 <= new_quality <= 63:
+                self.min_quality = new_quality
+        except (ValueError, AttributeError):
+            # Invalid value, ignore
+            pass
+    
+    def filter_scan_data(self, scan_data: List[Tuple[float, float, float]]) -> List[Tuple[float, float, float]]:
+        """
+        Apply various filters to improve scan accuracy.
+        Returns filtered scan data.
+        """
+        if not scan_data:
+            return []
+        
+        try:
+            filtered = scan_data.copy()
+            
+            # 1. Quality threshold filter
+            original_count = len(filtered)
+            # Apply quality filter - only keep points with quality >= min_quality
+            filtered = [(q, ang, dist) for q, ang, dist in filtered if q >= self.min_quality]
+            
+            # Debug: print filter stats (can be removed later)
+            if original_count > 0:
+                removed = original_count - len(filtered)
+                if removed > 0:
+                    print(f"Quality filter: removed {removed}/{original_count} points (threshold={self.min_quality})")
+            
+            # Warn if filtering removed all points
+            if original_count > 0 and len(filtered) == 0:
+                # Update status to warn user
+                self.root.after(0, lambda: self.status_var.set(
+                    f"Warning: Quality filter (min={self.min_quality}) removed all points!"
+                ))
+            
+            # 2. Distance range filter
+            filtered = [(q, ang, dist) for q, ang, dist in filtered if self.min_distance <= dist <= self.max_distance]
+            
+            # 3. Outlier detection using statistical filtering
+            if self.remove_outliers and len(filtered) > 3:
+                filtered = self.remove_outliers_statistical(filtered)
+            
+            return filtered
+        except Exception as e:
+            # If filtering fails, return original data to prevent scan from stopping
+            print(f"Filter error: {e}")
+            import traceback
+            traceback.print_exc()
+            return scan_data
+    
+    def remove_outliers_statistical(self, scan_data: List[Tuple[float, float, float]], 
+                       z_threshold: float = 2.5) -> List[Tuple[float, float, float]]:
+        """
+        Remove outliers using Z-score method on distances.
+        Points with distances that deviate significantly from neighbors are removed.
+        """
+        if len(scan_data) < 3:
+            return scan_data
+        
+        # Sort by angle for neighbor analysis
+        sorted_data = sorted(scan_data, key=lambda t: t[1])
+        
+        # Calculate local distance statistics for each point
+        filtered = []
+        window_size = min(5, len(sorted_data) // 4)  # Adaptive window size
+        
+        for i in range(len(sorted_data)):
+            # Get neighbors within window
+            start_idx = max(0, i - window_size)
+            end_idx = min(len(sorted_data), i + window_size + 1)
+            neighbors = sorted_data[start_idx:end_idx]
+            
+            if len(neighbors) < 2:
+                filtered.append(sorted_data[i])
+                continue
+            
+            # Calculate mean and std of neighbor distances
+            neighbor_dists = [dist for _, _, dist in neighbors]
+            mean_dist = sum(neighbor_dists) / len(neighbor_dists)
+            variance = sum((d - mean_dist) ** 2 for d in neighbor_dists) / len(neighbor_dists)
+            std_dist = math.sqrt(variance) if variance > 0 else 1.0
+            
+            # Check if current point is within acceptable range
+            current_dist = sorted_data[i][2]
+            if std_dist > 0:
+                z_score = abs(current_dist - mean_dist) / std_dist
+                if z_score <= z_threshold:
+                    filtered.append(sorted_data[i])
+            else:
+                filtered.append(sorted_data[i])
+        
+        return filtered
+    
+    def average_scans(self, scans: List[List[Tuple[float, float, float]]]) -> List[Tuple[float, float, float]]:
+        """
+        Average multiple scans by angle binning.
+        This reduces noise and improves accuracy.
+        """
+        if not scans:
+            return []
+        
+        # Create angle bins (1 degree resolution)
+        angle_bins = {}
+        for scan in scans:
+            for q, ang, dist in scan:
+                bin_angle = round(ang)
+                if bin_angle not in angle_bins:
+                    angle_bins[bin_angle] = []
+                angle_bins[bin_angle].append((q, dist))
+        
+        # Average points in each bin
+        averaged = []
+        for angle, points in angle_bins.items():
+            if points:
+                # Use median for distance (more robust than mean)
+                distances = [dist for _, dist in points]
+                qualities = [q for q, _ in points]
+                distances.sort()
+                qualities.sort()
+                
+                median_dist = distances[len(distances) // 2]
+                median_quality = qualities[len(qualities) // 2]
+                
+                averaged.append((median_quality, float(angle), median_dist))
+        
+        return sorted(averaged, key=lambda t: t[1])
+    
     def test_connection(self):
         """Test if the selected port can be opened."""
         port = self.device_var.get().strip()
@@ -439,6 +603,7 @@ class ScannerGUI:
             return
         
         self.scanning = True
+        self.scan_buffer.clear()  # Clear averaging buffer on new scan session
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
         self.status_var.set("Starting scanner...")
@@ -450,6 +615,7 @@ class ScannerGUI:
     def stop_scan(self):
         """Stop scanning."""
         self.scanning = False
+        self.scan_buffer.clear()  # Clear averaging buffer
         self.status_var.set("Stopping scanner...")
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
@@ -495,15 +661,27 @@ class ScannerGUI:
             while self.scanning:
                 try:
                     scan = next(it)
-                    # Filter and process scan
-                    filtered = [
+                    # Basic filtering: normalize angles
+                    raw_filtered = [
                         (q, (ang % 360.0), dist)
                         for (q, ang, dist) in scan
-                        if q >= MIN_QUALITY
                     ]
-                    filtered.sort(key=lambda t: t[1])
+                    raw_filtered.sort(key=lambda t: t[1])
+                    
+                    # Apply user-defined filters
+                    filtered = self.filter_scan_data(raw_filtered)
                     
                     if filtered:
+                        # Handle scan averaging if enabled
+                        if self.scan_averaging:
+                            self.scan_buffer.append(filtered)
+                            if len(self.scan_buffer) > self.avg_count:
+                                self.scan_buffer.pop(0)  # Keep only last N scans
+                            
+                            # Average the scans in buffer
+                            if len(self.scan_buffer) >= 2:
+                                filtered = self.average_scans(self.scan_buffer)
+                        
                         # Update current scan data
                         self.current_scan_data = filtered
                         
@@ -511,15 +689,50 @@ class ScannerGUI:
                         angles = [ang for _, ang, _ in filtered]
                         coverage = angular_span_deg(angles)
                         
+                        # Calculate quality statistics (show filtered data, not raw)
+                        if filtered:
+                            qualities = [q for q, _, _ in filtered]
+                            min_q = min(qualities) if qualities else 0
+                            max_q = max(qualities) if qualities else 0
+                            avg_q = sum(qualities) / len(qualities) if qualities else 0
+                            quality_stats = f"Quality: min={int(min_q)}, max={int(max_q)}, avg={int(avg_q)} (filtered, threshold={self.min_quality})"
+                        else:
+                            quality_stats = "Quality: N/A"
+                        
                         # Update UI in main thread
-                        self.root.after(0, lambda: self.update_plot(filtered))
-                        self.root.after(0, lambda: self.coverage_var.set(f"Coverage: {coverage:.1f}°"))
+                        self.root.after(0, lambda f=filtered: self.update_plot(f))
+                        self.root.after(0, lambda c=coverage: self.coverage_var.set(f"Coverage: {c:.1f}°"))
+                        self.root.after(0, lambda q=quality_stats: self.quality_stats_var.set(q))
+                    else:
+                        # No points after filtering - show warning
+                        if raw_filtered:
+                            qualities = [q for q, _, _ in raw_filtered]
+                            min_q = min(qualities) if qualities else 0
+                            max_q = max(qualities) if qualities else 0
+                            avg_q = sum(qualities) / len(qualities) if qualities else 0
+                            quality_stats = f"Quality: min={int(min_q)}, max={int(max_q)}, avg={int(avg_q)} (FILTERED OUT!)"
+                            self.root.after(0, lambda q=quality_stats: self.quality_stats_var.set(q))
+                            self.root.after(0, lambda: self.status_var.set(
+                                "No points pass filters - lower quality threshold!"
+                            ))
                         
                 except StopIteration:
                     break
-                except Exception:
+                except Exception as e:
                     if self.scanning:
-                        self.root.after(0, lambda: self.status_var.set("Scan error occurred"))
+                        error_msg = f"Scan error: {str(e)}"
+                        self.root.after(0, lambda msg=error_msg: self.status_var.set(msg))
+                        # Print to console for debugging
+                        print(f"Scan error: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        # Try to continue scanning instead of breaking immediately
+                        # Only break if it's a critical error
+                        if "disconnect" in str(e).lower() or "port" in str(e).lower():
+                            break
+                        # Otherwise, continue to next iteration
+                        time.sleep(0.1)
+                        continue
                     break
             
             # Cleanup
@@ -570,7 +783,7 @@ class ScannerGUI:
             distances = [dist for _, _, dist in scan_data]
             
             # Plot points
-            self.ax.scatter(angles, distances, s=10, color="tab:blue", alpha=0.6)
+            self.ax.scatter(angles, distances, s=5, color="tab:blue", alpha=0.6)
             
             # Set fixed axis limits using the user-specified radius
             # Don't auto-expand - use the radius from the GUI control
@@ -670,7 +883,7 @@ class ScannerGUI:
                 all_angles = [math.radians(ang) for _, ang, _ in self.current_scan_data]
                 all_distances = [dist for _, _, dist in self.current_scan_data]
             
-            ax_export.scatter(all_angles, all_distances, s=10, color="tab:blue", alpha=0.6)
+            ax_export.scatter(all_angles, all_distances, s=5, color="tab:blue", alpha=0.6)
             ax_export.set_title(f"LiDAR Scan Export ({len(self.all_scans) if self.all_scans else 1} scan(s))")
             ax_export.set_rlabel_position(135)
             ax_export.set_ylabel("Radius (mm)")
