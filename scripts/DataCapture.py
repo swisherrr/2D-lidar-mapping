@@ -95,9 +95,17 @@ def main():
     lidar = RPLidar(dev, baudrate=BAUD, timeout=TIMEOUT)
 
     # Clean state
-    for fn in (lidar.stop, lidar.clear_input, lidar.stop_motor):
-        try: fn()
-        except Exception: pass
+    # Clean state
+    try:
+        lidar.stop()
+    except: pass
+    try: 
+        lidar.stop_motor()
+    except: pass
+    try:
+        if hasattr(lidar, 'clear_input'):
+            lidar.clear_input()
+    except: pass
 
     # Spin up
     lidar.start_motor()
@@ -109,7 +117,12 @@ def main():
     for _ in range(WARMUP_SCANS):
         try: next(it)
         except Exception:
-            lidar.stop(); lidar.clear_input(); time.sleep(0.2)
+            lidar.stop()
+            try:
+                if hasattr(lidar, 'clear_input'):
+                    lidar.clear_input()
+            except: pass
+            time.sleep(0.2)
             it = lidar.iter_scans(max_buf_meas=5000)
 
     saved = 0
