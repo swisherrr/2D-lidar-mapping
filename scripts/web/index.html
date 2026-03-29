@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiDAR Web Dashboard</title>
+    <!-- Modern Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Controls -->
+        <aside class="sidebar glass-panel">
+            <div class="sidebar-header">
+                <h1>Live LiDAR Stream</h1>
+                <div class="status-indicator">
+                    <span class="dot" id="connection-dot"></span>
+                    <span id="connection-text">Disconnected</span>
+                </div>
+            </div>
+
+            <!-- Device Controls -->
+            <section class="control-group">
+                <h3>Device</h3>
+                <div class="input-row">
+                    <select id="port-select" disabled>
+                        <option>Detecting ports...</option>
+                    </select>
+                </div>
+            </section>
+
+            <!-- Plot Controls -->
+            <section class="control-group">
+                <h3>Scan Parameters</h3>
+                <div class="input-row">
+                    <label for="max-radius">Max Radius (mm)</label>
+                    <input type="number" id="max-radius" value="8000" min="1000" max="50000" step="1000">
+                </div>
+                <div class="input-row">
+                    <label for="min-quality">Min Quality (0-63)</label>
+                    <input type="number" id="min-quality" value="10" min="0" max="63">
+                </div>
+            </section>
+
+            <!-- Action Buttons -->
+            <section class="control-actions">
+                <button id="btn-start" class="btn success animated-hover">▶ Start Scan</button>
+                <button id="btn-stop" class="btn danger animated-hover" disabled>■ Stop Scan</button>
+            </section>
+
+            <!-- Export -->
+            <section class="control-actions secondary">
+                <button id="btn-export-csv" class="btn outline animated-hover">Download CSV</button>
+            </section>
+
+            <!-- Telemetry -->
+            <section class="telemetry">
+                <div class="metric">
+                    <span>Coverage</span>
+                    <strong id="stat-coverage">0.0°</strong>
+                </div>
+                <div class="metric">
+                    <span>Quality Avg</span>
+                    <strong id="stat-quality">N/A</strong>
+                </div>
+                <div class="metric" style="margin-top: 5px; font-size: 0.8rem; color: #8ba3ba; word-break: break-all;">
+                    <span id="stat-status">System Ready</span>
+                </div>
+            </section>
+        </aside>
+
+        <!-- Main Visualization Area -->
+        <main class="visualization-area">
+            <div class="canvas-container glass-panel">
+                <canvas id="lidar-canvas"></canvas>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="app.js"></script>
+</body>
+</html>
