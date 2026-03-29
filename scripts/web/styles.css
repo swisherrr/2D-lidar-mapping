@@ -1,0 +1,119 @@
+:root {
+    --bg-dark: #0f111a;
+    --panel-bg: rgba(26, 29, 41, 0.7);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    
+    --brand-primary: #3b82f6;
+    --brand-glow: rgba(59, 130, 246, 0.5);
+    
+    --color-success: #10b981;
+    --color-danger: #ef4444;
+    --color-warning: #f59e0b;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-dark);
+    color: var(--text-main);
+    overflow: hidden;
+    height: 100vh;
+}
+
+.app-container {
+    display: flex;
+    height: 100vh;
+    padding: 20px;
+    gap: 20px;
+    background-image: 
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.1), transparent 400px),
+        radial-gradient(circle at bottom left, rgba(16, 185, 129, 0.05), transparent 400px);
+}
+
+.glass-panel {
+    background: var(--panel-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.sidebar {
+    width: 320px;
+    min-width: 320px;
+    display: flex;
+    flex-direction: column;
+    padding: 22px;
+    gap: 20px;
+    z-index: 10;
+}
+
+.sidebar-header h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    background: linear-gradient(135deg, #fff, #94a3b8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+}
+
+.status-indicator {
+    display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted);
+}
+.dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #ef4444; box-shadow: 0 0 10px #ef4444; transition: 0.3s;
+}
+.dot.connected { background: #10b981; box-shadow: 0 0 10px #10b981; }
+
+.control-group { display: flex; flex-direction: column; gap: 10px; }
+.control-group.multi-item { padding-bottom: 5px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+
+.control-group h3 {
+    font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted);
+}
+
+.input-row {
+    display: flex; justify-content: space-between; align-items: center;
+}
+.input-row label { font-size: 0.85rem; color: var(--text-main); }
+
+input, select {
+    background: rgba(15, 17, 26, 0.5); border: 1px solid var(--panel-border); border-radius: 6px;
+    color: var(--text-main); padding: 6px 10px; font-family: 'Inter', sans-serif; font-size: 0.9rem;
+    width: 100px; transition: 0.2s;
+}
+input:focus, select:focus { outline: none; border-color: var(--brand-primary); }
+select { width: 100%; }
+select option { background: var(--bg-dark); }
+
+.control-actions { display: flex; flex-direction: column; gap: 10px; }
+.btn {
+    width: 100%; padding: 10px 14px; border: none; border-radius: 8px;
+    font-family: inherit; font-weight: 600; font-size: 0.9rem; cursor: pointer; transition: 0.3s;
+}
+.btn:disabled { opacity: 0.5; pointer-events: none; }
+.btn.success { background: var(--color-success); color: white; }
+.btn.danger { background: var(--color-danger); color: white; }
+.btn.outline { background: transparent; border: 1px solid var(--panel-border); color: var(--text-muted); }
+.btn.outline-warning { border-color: rgba(245, 158, 11, 0.4); color: var(--color-warning); }
+
+.btn.success:hover { box-shadow: 0 0 15px rgba(16, 185, 129, 0.3); }
+.btn.danger:hover { box-shadow: 0 0 15px rgba(239, 68, 68, 0.3); }
+.btn.outline:hover { border-color: var(--text-main); color: var(--text-main); }
+.btn.outline-warning:hover { border-color: var(--color-warning); box-shadow: 0 0 15px rgba(245, 158, 11, 0.15); }
+.animated-hover:active { transform: scale(0.97); }
+
+.telemetry {
+    margin-top: auto; background: rgba(0, 0, 0, 0.2); border-radius: 12px; padding: 14px;
+    display: flex; flex-direction: column; gap: 8px;
+}
+.metric { display: flex; justify-content: space-between; align-items: center; }
+.metric span { font-size: 0.8rem; color: var(--text-muted); }
+.metric strong { font-variant-numeric: tabular-nums; color: var(--brand-primary); font-size: 0.9rem;}
+
+.visualization-area { flex: 1; position: relative; }
