@@ -1,6 +1,6 @@
 """
-Lightweight Fast-API Web Server for Real-time LiDAR Scanning.
-Runs on the Raspberry Pi and securely serves the web dashboard over the local network.
+Lightweight Fast-API Web Server for Real-time 3D point cloud LiDAR Scanning.
+Runs on the Raspberry Pi and sweeps adafruit_servokit while broadcasting tracking data.
 """
 import sys
 import os
@@ -17,25 +17,17 @@ try:
     from fastapi.staticfiles import StaticFiles
     import uvicorn
 except ImportError:
-    print("Missing dependencies. Please install with: pip install fastapi uvicorn websockets")
+    print("Missing web dependencies. pip install fastapi uvicorn websockets")
     sys.exit(1)
 
-# Import shared constants from DataCapture (simulating setup from ScannerGUI)
 scripts_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, scripts_dir)
 
 try:
     import DataCapture as dc
-    from DataCapture import (
-        BAUD, TIMEOUT, SPINUP_S, WARMUP_SCANS,
-        angular_span_deg, list_ports
-    )
+    from DataCapture import (BAUD, TIMEOUT, SPINUP_S, WARMUP_SCANS, list_ports)
 except (ImportError, AttributeError):
-    BAUD = 115200
-    TIMEOUT = 1
-    SPINUP_S = 1.5
-    WARMUP_SCANS = 3
-    def angular_span_deg(angles): return 0.0
+    BAUD = 115200; TIMEOUT = 1; SPINUP_S = 1.5; WARMUP_SCANS = 3
     list_ports = None
 
 try:
@@ -44,64 +36,7 @@ except ImportError:
     RPLidar = None
 
 # Initialize FastAPI App
-app = FastAPI(title="LiDAR Web Dashboard")
-
-# Thread-safe State Manager
-class LidarStateManager:
-    def __init__(self):
-        self.lidar = None
-        self.scanning = False
-        self.scan_thread = None
-        self.device_port = None
-        
-        # UI Config
-        self.min_quality = 10
-        self.max_radius = 8000
-        self.min_distance = 100
-        self.remove_outliers = True
-        
-        # Telemetry State
-        self.latest_msg = {
-            "type": "scan_data",
-            "points": [],
-            "coverage": 0.0,
-            "quality_str": "N/A"
-        }
-        self.status_text = "Ready"
-        
-        # Connected WebSocket Clients
-        self.active_connections: Set[WebSocket] = set()
-
-    def get_available_ports(self):
-        if not list_ports: return ["/dev/ttyUSB0", "COM4"]
-        try:
-            return sorted([p.device for p in list_ports.comports()])
-        except Exception:
-            return ["/dev/ttyUSB0"]
-
-manager = LidarStateManager()
-
-# Broadcast background task
-async def telemetry_broadcaster():
-    """Continuously broadcast the latest scan frame to all connected browsers at 15Hz"""
-    while True:
-        if manager.scanning and manager.active_connections:
-            # Create a string payload to avoid JSON serializing for every single client
-            payload = json.dumps(manager.latest_msg)
-            dead_connections = set()
-            
-            for connection in list(manager.active_connections):
-                try:
-                    await connection.send_text(payload)
-                except Exception:
-                    dead_connections.add(connection)
-            
-            # Cleanup dead connections
-            manager.active_connections -= dead_connections
-            
-        await asyncio.sleep(0.06)  # ~16 FPS
-
-# Async app startup
+app = FastAPI(title="3D LiDAR Backend")
 main_loop = None
 
 @app.on_event("startup")
@@ -110,44 +45,53 @@ async def startup_event():
     main_loop = asyncio.get_running_loop()
     asyncio.create_task(telemetry_broadcaster())
 
-# Optional: Z-score filter implementation from GUI
-def remove_outliers_statistical(scan_data, z_threshold=2.5):
-    if len(scan_data) < 3: return scan_data
-    sorted_data = sorted(scan_data, key=lambda t: t[1])
-    filtered = []
-    window_size = min(5, len(sorted_data) // 4)
-    
-    for i in range(len(sorted_data)):
-        start_idx = max(0, i - window_size)
-        end_idx = min(len(sorted_data), i + window_size + 1)
-        neighbors = sorted_data[start_idx:end_idx]
-        if len(neighbors) < 2:
-            filtered.append(sorted_data[i])
-            continue
-            
-        neighbor_dists = [dist for _, _, dist in neighbors]
-        mean_dist = sum(neighbor_dists) / len(neighbor_dists)
-        variance = sum((d - mean_dist) ** 2 for d in neighbor_dists) / len(neighbor_dists)
-        std_dist = math.sqrt(variance) if variance > 0 else 1.0
+# Thread-safe State Manager
+class LidarStateManager:
+    def __init__(self):
+        self.lidar = None
+        self.scanning = False
+        self.scan_thread = None
+        self.servo_thread = None
+        self.device_port = None
         
-        current_dist = sorted_data[i][2]
-        if std_dist > 0 and abs(current_dist - mean_dist) / std_dist <= z_threshold:
-            filtered.append(sorted_data[i])
-            
-    return filtered
+        # UI Config & Constraints
+        self.min_quality = 10
+        self.max_radius = 8000
+        self.min_distance = 100
+        
+        # 3D Tilt Parameters
+        self.tilt_min = 85.0
+        self.tilt_max = 95.0
+        self.sweep_speed = 1.0  # degrees shifted per ~50ms
+        self.current_tilt_angle = 90.0
+        self.kit = None
+        
+        # Telemetry State
+        self.latest_msg = { "type": "scan_data", "points": [] }
+        self.status_text = "Ready"
+        self.active_connections: Set[WebSocket] = set()
 
-def filter_scan_data(scan_data):
-    if not scan_data: return []
-    filtered = [(q, ang, dist) for q, ang, dist in scan_data if q >= manager.min_quality]
-    filtered = [(q, ang, dist) for q, ang, dist in filtered if manager.min_distance <= dist <= manager.max_radius]
-    
-    if manager.remove_outliers and len(filtered) > 3:
-        filtered = remove_outliers_statistical(filtered)
-    return filtered
+    def get_available_ports(self):
+        if not list_ports: return ["/dev/ttyUSB0", "COM4"]
+        try: return sorted([p.device for p in list_ports.comports()])
+        except: return ["/dev/ttyUSB0"]
+
+manager = LidarStateManager()
+
+async def telemetry_broadcaster():
+    """Continuously broadcast the latest scan frame to all connected browsers at 15Hz"""
+    while True:
+        if manager.scanning and manager.active_connections and getattr(manager, 'payload', None):
+            dead = set()
+            for connection in list(manager.active_connections):
+                try: await connection.send_text(manager.payload)
+                except Exception: dead.add(connection)
+            manager.active_connections -= dead
+        await asyncio.sleep(0.06)
 
 def set_status(msg):
     manager.status_text = msg
-    print(f"[LiDAR] {msg}")
+    print(f"[3D SCAN] {msg}")
     broadcast_status()
 
 def broadcast_status():
@@ -157,77 +101,138 @@ def broadcast_status():
         "is_scanning": manager.scanning,
         "status_text": manager.status_text
     })
-    # Cannot await inside thread, so we fire and forget in main loop
     for connection in list(manager.active_connections):
         asyncio.run_coroutine_threadsafe(connection.send_text(payload), main_loop)
 
-# Blocking scan thread
-def hardware_scan_loop():
+# ---------------------------------------------
+# HARDWARE LOOPS
+# ---------------------------------------------
+
+def servo_sweep_loop():
+    """Background thread to continuously tilt the platform while scanning"""
     try:
-        set_status(f"Connecting to {manager.device_port}...")
-        manager.lidar = RPLidar(manager.device_port, baudrate=BAUD, timeout=TIMEOUT)
+        from adafruit_servokit import ServoKit
+        manager.kit = ServoKit(channels=16)
+        TILT_CHANNEL = 0
+        PAN_CHANNEL = 1
         
-        try: manager.lidar.stop()
-        except: pass
-        try: manager.lidar.stop_motor()
-        except: pass
-        try: manager.lidar.clean_input()
-        except: pass
+        # Expand ranges based on tilt_test.py
+        manager.kit.servo[PAN_CHANNEL].set_pulse_width_range(500, 2500)
+        manager.kit.servo[TILT_CHANNEL].set_pulse_width_range(500, 2500)
         
-        manager.lidar.start_motor()
-        time.sleep(SPINUP_S)
-        set_status("Scanner ready - collecting data...")
-        
-        it = manager.lidar.iter_scans(max_buf_meas=5000)
-        
-        for _ in range(WARMUP_SCANS):
-            try: next(it)
-            except: time.sleep(0.1)
-            
-        while manager.scanning:
-            try:
-                scan = next(it)
-                raw_filtered = [(q, (ang % 360.0), dist) for (q, ang, dist) in scan]
-                raw_filtered.sort(key=lambda t: t[1])
-                
-                filtered = filter_scan_data(raw_filtered)
-                
-                if filtered:
-                    angles = [ang for _, ang, _ in filtered]
-                    qualities = [q for q, _, _ in filtered]
-                    
-                    manager.latest_msg = {
-                        "type": "scan_data",
-                        "points": filtered, # Only sending essential float tuples
-                        "coverage": angular_span_deg(angles),
-                        "quality_str": f"Avg={int(sum(qualities)/len(qualities))} (min={int(min(qualities))})"
-                    }
-                
-            except StopIteration:
-                break
-            except Exception as e:
-                set_status(f"Transient Error: {e}")
-                time.sleep(0.1)
-                
+        # We will deliberately NOT write any angle to the PAN servo. 
+        # Leaving it limp prevents the assembly from rotating sideways into the frame constraints.
     except Exception as e:
-        set_status(f"Fatal Error: {e}")
-        manager.scanning = False
-        broadcast_status()
+        set_status(f"Servo I2C Error: {e}")
+        return # Exit loop if we can't find I2C servos
         
-    finally:
-        manager.scanning = False
-        if manager.lidar:
+    set_status("Servo interface connected...")
+    
+    sweep_dir = 1
+    manager.current_tilt_angle = manager.tilt_min
+    
+    while manager.scanning:
+        try:
+            # Advance angle
+            manager.current_tilt_angle += sweep_dir * manager.sweep_speed
+            
+            # Boundary checks
+            if manager.current_tilt_angle >= manager.tilt_max:
+                manager.current_tilt_angle = manager.tilt_max
+                sweep_dir = -1
+            elif manager.current_tilt_angle <= manager.tilt_min:
+                manager.current_tilt_angle = manager.tilt_min
+                sweep_dir = 1
+                
+            manager.kit.servo[TILT_CHANNEL].angle = int(manager.current_tilt_angle)
+            time.sleep(0.05)
+            # 50ms update delay (~20 Hz refresh rate for smooth sweep)
+            time.sleep(0.05)
+            
+        except Exception as e:
+            print(f"Servo sweep error: {e}")
+            time.sleep(1)
+            
+    # Relax servos on shutdown so they don't stay stiff
+    try:
+        if manager.kit:
+            manager.kit.servo[0].angle = None
+            manager.kit.servo[1].angle = None
+    except:
+        pass
+
+
+def hardware_scan_loop():
+    """Main LiDAR Iterator, tags incoming points with current servo tilt"""
+    
+    while manager.scanning:
+        try:
+            set_status(f"Connecting to {manager.device_port}...")
+            manager.lidar = RPLidar(manager.device_port, baudrate=BAUD, timeout=TIMEOUT)
+            
+            try: manager.lidar.stopMotor()
+            except: pass
             try: manager.lidar.stop()
             except: pass
-            try: manager.lidar.stop_motor()
-            except: pass
-            try: manager.lidar.disconnect()
-            except: pass
-            manager.lidar = None
+            time.sleep(0.5)
             
-        set_status("Scan stopped.")
+            try: manager.lidar.clean_input()
+            except: pass
+            
+            manager.lidar.start_motor()
+            time.sleep(SPINUP_S)
+            set_status("Scanner ready - collecting 3D data...")
+            
+            it = manager.lidar.iter_scans(max_buf_meas=5000)
+            
+            for _ in range(WARMUP_SCANS):
+                next(it) # Let exceptions bubble up to trigger the outer reconnect loop
+                
+            while manager.scanning:
+                try:
+                    scan = next(it) 
+                    
+                    pitch = manager.current_tilt_angle
+                    
+                    filtered_points = []
+                    for q, ang, dist in scan:
+                        if q >= manager.min_quality and manager.min_distance <= dist <= manager.max_radius:
+                            filtered_points.append([float(q), float(ang % 360.0), float(dist), float(pitch)])
+                    
+                    if filtered_points:
+                        msg = { "type": "scan_data", "points": filtered_points }
+                        manager.payload = json.dumps(msg) 
+                    
+                except StopIteration:
+                    set_status("LiDAR stopped yielding data. Rebuilding...")
+                    break # Break inner loop to trigger outer reconnect
+                except Exception as e:
+                    set_status(f"Transient Error: {e}")
+                    break # Break inner loop to trigger outer reconnect
+                    
+        except Exception as e:
+            if manager.scanning:
+                set_status(f"Hardware Error: {e}")
+                time.sleep(1)
+            
+        finally:
+            if manager.lidar:
+                try: manager.lidar.stop()
+                except: pass
+                try: manager.lidar.stop_motor()
+                except: pass
+                try: manager.lidar.disconnect()
+                except: pass
+                manager.lidar = None
+                
+            if manager.scanning:
+                time.sleep(1.2)
+                
+    set_status("Scan fully stopped.")
 
-# WebSockets Endpoint
+# ---------------------------------------------
+# WEBSOCKET API
+# ---------------------------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -240,14 +245,15 @@ async def websocket_endpoint(websocket: WebSocket):
             
             if action == "get_ports":
                 await websocket.send_json({"type": "ports", "data": manager.get_available_ports()})
-                
             elif action == "get_status":
                 await websocket.send_json({"type": "status", "is_scanning": manager.scanning, "status_text": manager.status_text})
-                
+            
             elif action == "update_config":
                 cfg = cmd.get("config", {})
                 if "min_quality" in cfg: manager.min_quality = cfg["min_quality"]
                 if "max_radius" in cfg: manager.max_radius = cfg["max_radius"]
+                if "tilt_min" in cfg: manager.tilt_min = cfg["tilt_min"]
+                if "tilt_max" in cfg: manager.tilt_max = cfg["tilt_max"]
                 
             elif action == "start_scan":
                 if not manager.scanning:
@@ -255,35 +261,31 @@ async def websocket_endpoint(websocket: WebSocket):
                     cfg = cmd.get("config", {})
                     if "min_quality" in cfg: manager.min_quality = cfg["min_quality"]
                     if "max_radius" in cfg: manager.max_radius = cfg["max_radius"]
+                    if "tilt_min" in cfg: manager.tilt_min = cfg["tilt_min"]
+                    if "tilt_max" in cfg: manager.tilt_max = cfg["tilt_max"]
                     
                     manager.scanning = True
                     broadcast_status()
+                    
+                    # Fire both threads!
                     manager.scan_thread = threading.Thread(target=hardware_scan_loop, daemon=True)
+                    manager.servo_thread = threading.Thread(target=servo_sweep_loop, daemon=True)
                     manager.scan_thread.start()
+                    manager.servo_thread.start()
                     
             elif action == "stop_scan":
                 manager.scanning = False
                 set_status("Stopping scanner...")
                 
-            elif action == "export_csv":
-                csv_lines = ["Quality,Angle(deg),Distance(mm)"]
-                for p in manager.latest_msg["points"]:
-                    csv_lines.append(f"{p[0]},{p[1]},{p[2]}")
-                csv_string = "\n".join(csv_lines)
-                await websocket.send_json({"type": "export_ready", "csv_data": csv_string})
-                
     except WebSocketDisconnect:
         manager.active_connections.remove(websocket)
 
-# Mount Static Files (Frontend) AT THE END
+# Mount Frontend
 web_dir = os.path.join(scripts_dir, "web")
 app.mount("/", StaticFiles(directory=web_dir, html=True), name="web")
 
 if __name__ == "__main__":
     print("="*50)
-    print("LiDAR Web Dashboard Starting")
-    print("To view, open a browser on any device in your network to: http://192.168.50.149:5000")
+    print("3D LiDAR Server Active")
     print("="*50)
-    
-    # Run the uvicorn ASGI server
     uvicorn.run(app, host="0.0.0.0", port=5000, log_level="error")

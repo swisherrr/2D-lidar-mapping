@@ -3,9 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LiDAR Web Dashboard</title>
+    <title>3D LiDAR Environmental Dashboard</title>
     <!-- Modern Font -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- WebGL Engines -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <!-- Styles -->
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,16 +17,16 @@
         <!-- Sidebar Controls -->
         <aside class="sidebar glass-panel">
             <div class="sidebar-header">
-                <h1>Live LiDAR Stream</h1>
+                <h1 style="font-size: 1.35rem">3D Cloud Stream</h1>
                 <div class="status-indicator">
                     <span class="dot" id="connection-dot"></span>
                     <span id="connection-text">Disconnected</span>
                 </div>
             </div>
 
-            <!-- Device Controls -->
+            <!-- System Limits -->
             <section class="control-group">
-                <h3>Device</h3>
+                <h3>System Config</h3>
                 <div class="input-row">
                     <select id="port-select" disabled>
                         <option>Detecting ports...</option>
@@ -31,16 +35,29 @@
             </section>
 
             <!-- Plot Controls -->
-            <section class="control-group">
-                <h3>Scan Parameters</h3>
-                <div class="input-row">
-                    <label for="max-radius">Max Radius (mm)</label>
+            <section class="control-group multi-item">
+                <h3>LiDAR Parameters</h3>
+                <div class="input-row compact">
+                    <label>Depth (mm)</label>
                     <input type="number" id="max-radius" value="8000" min="1000" max="50000" step="1000">
                 </div>
-                <div class="input-row">
-                    <label for="min-quality">Min Quality (0-63)</label>
+                <div class="input-row compact">
+                    <label>Quality (0-63)</label>
                     <input type="number" id="min-quality" value="10" min="0" max="63">
                 </div>
+            </section>
+
+            <section class="control-group multi-item">
+                <h3>Tilt Sweep (°/sec)</h3>
+                <div class="input-row compact">
+                    <label>Min Pitch</label>
+                    <input type="number" id="tilt-min" value="85" min="0" max="180">
+                </div>
+                <div class="input-row compact">
+                    <label>Max Pitch</label>
+                    <input type="number" id="tilt-max" value="95" min="0" max="180">
+                </div>
+                <!-- Remove the speed parameter from UI for simplicity, we manage it in backend -->
             </section>
 
             <!-- Action Buttons -->
@@ -51,18 +68,19 @@
 
             <!-- Export -->
             <section class="control-actions secondary">
-                <button id="btn-export-csv" class="btn outline animated-hover">Download CSV</button>
+                <button id="btn-clear" class="btn outline animated-hover outline-warning">Reset Point Cloud</button>
+                <button id="btn-export-csv" class="btn outline animated-hover">Export 3D Points</button>
             </section>
 
             <!-- Telemetry -->
             <section class="telemetry">
                 <div class="metric">
-                    <span>Coverage</span>
-                    <strong id="stat-coverage">0.0°</strong>
+                    <span>Point Cloud Size</span>
+                    <strong id="stat-points">0 vertices</strong>
                 </div>
                 <div class="metric">
-                    <span>Quality Avg</span>
-                    <strong id="stat-quality">N/A</strong>
+                    <span>Current Tilt</span>
+                    <strong id="stat-tilt">90.0°</strong>
                 </div>
                 <div class="metric" style="margin-top: 5px; font-size: 0.8rem; color: #8ba3ba; word-break: break-all;">
                     <span id="stat-status">System Ready</span>
@@ -72,8 +90,11 @@
 
         <!-- Main Visualization Area -->
         <main class="visualization-area">
-            <div class="canvas-container glass-panel">
-                <canvas id="lidar-canvas"></canvas>
+            <div id="threejs-container" class="glass-panel" style="width: 100%; height: 100%; border-radius: 16px; overflow: hidden; position: relative;">
+                <!-- Overlay instructions for camera -->
+                <div style="position: absolute; top: 15px; left: 15px; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 6px; font-size: 0.8rem; pointer-events: none; z-index: 2;">
+                    🖱 Left Click: Rotate | Right Click: Pan | Scroll: Zoom
+                </div>
             </div>
         </main>
     </div>
