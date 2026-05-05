@@ -27,7 +27,11 @@ Any device on the same LAN — phone, tablet, laptop — can view the live scan 
 | **LiDAR** | RPLidar A1 / A2 / A3 (USB serial) |
 | **Servo driver** | Adafruit PCA9685 16-channel PWM (I²C `0x40`) |
 | **Tilt servo** | Yahboom 25 kg or equivalent; wired to **Channel 0** |
-| **Motor power** | Dedicated AA-battery pack → `V+/GND` block on PCA9685  |
+| **Motor power** | Dedicated AA-battery pack → `V+/GND` block on PCA9685 |
+| **Motor controller** | Arduino Mega 2560 |
+| **Bluetooth module** | HC-05 (connected to Arduino `Serial1`, 9600 baud) |
+| **H-bridge driver** | L298N dual H-bridge; ENA/ENB on pins 5/6, direction on pins 50–53 |
+| **Drive motors** | Two DC gear motors wired to L298N output channels A & B |
 
 
 
@@ -37,7 +41,10 @@ Any device on the same LAN — phone, tablet, laptop — can view the live scan 
 
 ```
 
-| scripts/
+Arduino/
+│   └── Bluetooth_Code.ino  # Arduino sketch: HC-05 Bluetooth → L298N motor control
+|
+scripts/
 │   ├── ScannerWeb.py       # Backend (FastAPI + WebSocket + threads)
 │   ├── DataCapture.py      # Shared library: port detection, coord math, CSV capture
 │   ├── ScannerGUI.py       # Offline desktop GUI (Tkinter + Matplotlib, 2D polar)
@@ -95,6 +102,45 @@ dtoverlay=i2c-gpio,bus=4,i2c_gpio_sda=23,i2c_gpio_scl=24
 
 See the step-by-step procedure in [DEVELOPMENT.md § 1](DEVELOPMENT.md#1-hardware-assembly--motor-limitations).  
 **TL;DR:** Mount the bracket so that servo angle `90°` points the LiDAR straight up. This maps `45°` to forward pitch and `135°` to backward pitch with no frame collisions.
+
+---
+
+## Arduino — Bluetooth Motor Controller
+
+`Arduino/Bluetooth_Code.ino` turns any Arduino Mega (or compatible board) into a wireless motor controller for a two-wheel differential drive base using an **HC-05 Bluetooth module** and an **L298N H-bridge driver**.
+
+### Pin Mapping
+
+| Signal | Arduino Pin |
+|---|---|
+| Motor A PWM (ENA) | 5 |
+| Motor A dir IN1 | 50 |
+| Motor A dir IN2 | 51 |
+| Motor B PWM (ENB) | 6 |
+| Motor B dir IN3 | 52 |
+| Motor B dir IN4 | 53 |
+| HC-05 TX → RX | Serial1 (pins 18/19) |
+
+### Command Protocol
+
+Send single ASCII characters over Bluetooth (9600 baud) to control the robot:
+
+| Character | Action |
+|---|---|
+| `w` | Forward |
+| `s` | Reverse |
+| `a` | Pivot left |
+| `d` | Pivot right |
+| `x` | Stop |
+| `q` | Emergency stop (locks until reset) |
+| `1`–`9`, `0` | Set speed to 10%–90%, 100% |
+
+### Uploading the Sketch
+
+1. Open `Arduino/Bluetooth_Code.ino` in the Arduino IDE.
+2. Select **Board → Arduino Mega 2560** and the correct COM port.
+3. Upload. Open the Serial Monitor at **115,200 baud** to verify the `Bluetooth Ready` message.
+4. Pair your phone or laptop with the HC-05 module (default PIN: `1234`) and use any Bluetooth terminal app to send the commands above.
 
 ---
 

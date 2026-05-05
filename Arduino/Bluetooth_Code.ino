@@ -1,31 +1,14 @@
-/*
-  Arduino Mega + L298N (2 DC motors) WASD TEST over Serial
-
-  Serial Monitor settings:
-    Baud: 115200
-    Line ending: No line ending
-
-  Keys:
-    w forward
-    s reverse
-    a left  (A rev, B fwd)
-    d right (A fwd, B rev)
-    x stop
-    1-9 speed 10-90, 0=100
-    q stop + print quit message
-*/
-
 // ---- Motor A (left) ----
-const int ENA = 5;   // PWM
+const int ENA = 5;
 const int IN1 = 50;
 const int IN2 = 51;
 
 // ---- Motor B (right) ----
-const int ENB = 6;   // PWM
+const int ENB = 6;
 const int IN3 = 52;
 const int IN4 = 53;
 
-int speedPct = 60; // 0-100
+int speedPct = 60;
 
 int pwmFromPct(int pct) {
   pct = constrain(pct, 0, 100);
@@ -40,7 +23,7 @@ void motorA(int pwm, bool fwd) {
     return;
   }
   digitalWrite(IN1, fwd ? HIGH : LOW);
-  digitalWrite(IN2, fwd ? LOW  : HIGH);
+  digitalWrite(IN2, fwd ? LOW : HIGH);
   analogWrite(ENA, pwm);
 }
 
@@ -52,7 +35,7 @@ void motorB(int pwm, bool fwd) {
     return;
   }
   digitalWrite(IN3, fwd ? HIGH : LOW);
-  digitalWrite(IN4, fwd ? LOW  : HIGH);
+  digitalWrite(IN4, fwd ? LOW : HIGH);
   analogWrite(ENB, pwm);
 }
 
@@ -67,33 +50,33 @@ void drive(char cmd) {
   int pwm = pwmFromPct(speedPct);
 
   switch (cmd) {
-    case 'w': // forward
+    case 'w':
       motorA(pwm, true);
       motorB(pwm, true);
-      Serial.println("CMD: W (forward)");
+      Serial.println("Forward");
       break;
 
-    case 's': // reverse
+    case 's':
       motorA(pwm, false);
       motorB(pwm, false);
-      Serial.println("CMD: S (reverse)");
+      Serial.println("Reverse");
       break;
 
-    case 'a': // left turn
+    case 'a':
       motorA(pwm, false);
       motorB(pwm, true);
-      Serial.println("CMD: A (left turn)");
+      Serial.println("Left");
       break;
 
-    case 'd': // right turn
+    case 'd':
       motorA(pwm, true);
       motorB(pwm, false);
-      Serial.println("CMD: D (right turn)");
+      Serial.println("Right");
       break;
 
-    case 'x': // stop
+    case 'x':
       stopAll();
-      Serial.println("CMD: X (stop)");
+      Serial.println("Stop");
       break;
   }
 }
@@ -102,33 +85,33 @@ void setup() {
   pinMode(ENA, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
   pinMode(ENB, OUTPUT); pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT);
 
-  Serial.begin(115200);
+  Serial.begin(115200);    // USB debug
+  Serial1.begin(9600);     // Bluetooth (HC-05 default)
+
   stopAll();
 
-  Serial.println("=== L298N WASD TEST (2 motors) ===");
-  Serial.println("Serial Monitor: 115200 baud, No line ending");
-  Serial.println("WASD move | X stop | 1-9 speed | 0=100 | Q quit");
-  Serial.print("Speed = "); Serial.print(speedPct); Serial.println("%");
+  Serial.println("Bluetooth Ready");
 }
 
 void loop() {
-  if (Serial.available() > 0) {
-    char c = Serial.read();
+  if (Serial1.available()) {
+    char c = Serial1.read();
     c = tolower(c);
 
-    // speed keys
+    Serial.print("Received: ");
+    Serial.println(c);
+
     if (c >= '0' && c <= '9') {
       speedPct = (c == '0') ? 100 : (c - '0') * 10;
-      Serial.print("Speed set to ");
-      Serial.print(speedPct);
-      Serial.println("%");
+      Serial.print("Speed: ");
+      Serial.println(speedPct);
       return;
     }
 
     if (c == 'q') {
       stopAll();
-      Serial.println("Quit/Stop.");
-      while (true) { delay(1000); } // halt
+      Serial.println("Quit");
+      while (true);
     }
 
     if (c=='w' || c=='a' || c=='s' || c=='d' || c=='x') {
